@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: API Documentation
+    url: https://docs.ppn-hub.com
+    about: API ドキュメントで解決できるかもしれません
+  - name: Status Page
+    url: https://status.ppn-hub.com
+    about: 現在の障害情報を確認できます

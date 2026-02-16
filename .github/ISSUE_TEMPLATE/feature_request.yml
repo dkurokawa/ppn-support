@@ -1,0 +1,34 @@
+name: Feature Request
+description: 機能リクエスト・改善提案
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        機能リクエストをお寄せいただきありがとうございます。
+
+  - type: input
+    id: api
+    attributes:
+      label: API Name
+      description: 対象の API 名（全般の場合は「general」）
+      placeholder: "weathio"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: どのような機能・改善を望みますか？
+    validations:
+      required: true
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use Case
+      description: この機能がどのように役立つかを教えてください
+    validations:
+      required: false

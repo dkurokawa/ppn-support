@@ -1,0 +1,68 @@
+name: Bug Report
+description: API の不具合を報告する
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ご報告ありがとうございます。以下の情報を可能な限り記入してください。
+
+  - type: input
+    id: api
+    attributes:
+      label: API Name
+      description: 対象の API 名（例: weathio, address, solaria）
+      placeholder: "weathio"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: plan
+    attributes:
+      label: Your Plan
+      options:
+        - Free
+        - Starter
+        - Growth
+        - Business
+        - High-rate
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: 何が起きたか、何を期待していたかを記述してください
+      placeholder: "エンドポイント /api/v1/forecast にリクエストしたところ、500 エラーが返ってきました"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: 再現手順（curl コマンド等）
+      placeholder: |
+        curl -H "X-API-Key: ..." https://weathio.ppn-hub.com/api/v1/forecast?lat=35.68&lon=139.76
+    validations:
+      required: false
+
+  - type: textarea
+    id: response
+    attributes:
+      label: Error Response
+      description: エラーレスポンスの内容（JSON、ステータスコード等）
+      render: json
+    validations:
+      required: false
+
+  - type: input
+    id: request_id
+    attributes:
+      label: Request ID
+      description: レスポンスヘッダの X-Request-ID（あれば）
+      placeholder: "req_abc123..."
+    validations:
+      required: false
