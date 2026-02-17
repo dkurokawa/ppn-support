@@ -1,0 +1,158 @@
+name: AI First Response
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  ai-respond:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.issue.labels.*.name, 'internal') }}
+    steps:
+      - name: Parse issue content
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const labels = issue.labels.map(l => l.name);
+
+            // Detect issue type from labels
+            let issueType = 'general';
+            if (labels.includes('bug')) issueType = 'bug';
+            else if (labels.includes('question')) issueType = 'question';
+            else if (labels.includes('enhancement')) issueType = 'feature';
+
+            // Extract API name from title or body
+            const apiMatch = issue.body?.match(/API Name\s*\n\s*(.+)/i)
+              || issue.title.match(/\[(?:Bug|Question|Feature)\]:\s*(.+)/i);
+            const apiName = apiMatch ? apiMatch[1].trim() : null;
+
+            core.setOutput('issue_type', issueType);
+            core.setOutput('api_name', apiName || 'unknown');
+            core.setOutput('title', issue.title);
+            core.setOutput('body', issue.body || '');
+
+      - name: Check API status
+        id: status
+        run: |
+          API_NAME="${{ steps.parse.outputs.api_name }}"
+          STATUS_URL="https://ppn-hub.com/api/status/status"
+          STATUS=$(curl -sf "$STATUS_URL" 2>/dev/null | jq -r --arg api "$API_NAME" '.apis[] | select(.name | ascii_downcase == ($api | ascii_downcase)) | "\(.name): operational=\(.operational)"' 2>/dev/null || echo "status_unavailable")
+          echo "api_status=$STATUS" >> "$GITHUB_OUTPUT"
+
+      - name: Generate AI response
+        id: ai
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          ISSUE_TYPE="${{ steps.parse.outputs.issue_type }}"
+          API_NAME="${{ steps.parse.outputs.api_name }}"
+          TITLE="${{ steps.parse.outputs.title }}"
+          API_STATUS="${{ steps.status.outputs.api_status }}"
+
+          # Read issue body from event payload (handles multiline)
+          BODY=$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")
+
+          # Build prompt based on issue type
+          if [ "$ISSUE_TYPE" = "bug" ]; then
+            SYSTEM_PROMPT="You are a PPN (Planetary Prosperity Network) API support assistant. A user has reported a bug. Analyze the issue and provide:
+          1. Acknowledge the bug report
+          2. If the API status is available, mention current operational status
+          3. Common causes for the described error (based on HTTP status code if provided)
+          4. Suggested troubleshooting steps
+          5. Link to relevant documentation if applicable
+
+          Be helpful but concise. Use Japanese. If you cannot determine the root cause, say so clearly.
+          API documentation base URL: https://docs.ppn-hub.com
+          API console: https://ppn-hub.com/console
+          Status page: https://status.ppn-hub.com"
+          elif [ "$ISSUE_TYPE" = "question" ]; then
+            SYSTEM_PROMPT="You are a PPN (Planetary Prosperity Network) API support assistant. A user has a question. Provide:
+          1. A direct answer if possible
+          2. Links to relevant documentation
+          3. Code examples if applicable (curl commands)
+
+          Be helpful and concise. Use Japanese.
+          API documentation base URL: https://docs.ppn-hub.com
+          API console: https://ppn-hub.com/console"
+          else
+            SYSTEM_PROMPT="You are a PPN (Planetary Prosperity Network) API support assistant. Analyze the issue and provide helpful guidance. Be concise. Use Japanese.
+          API documentation base URL: https://docs.ppn-hub.com
+          API console: https://ppn-hub.com/console"
+          fi
+
+          USER_PROMPT="Issue Title: ${TITLE}
+          Issue Type: ${ISSUE_TYPE}
+          API Name: ${API_NAME}
+          API Status: ${API_STATUS}
+
+          Issue Body:
+          ${BODY}"
+
+          # Call Gemini API
+          RESPONSE=$(curl -sf "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg sys "$SYSTEM_PROMPT" \
+              --arg user "$USER_PROMPT" \
+              '{
+                "system_instruction": {"parts": [{"text": $sys}]},
+                "contents": [{"parts": [{"text": $user}]}],
+                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1024}
+              }')" 2>/dev/null)
+
+          # Extract text from response
+          AI_TEXT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null)
+
+          if [ -z "$AI_TEXT" ]; then
+            echo "ai_success=false" >> "$GITHUB_OUTPUT"
+            echo "AI response was empty or failed"
+          else
+            # Save to file to handle multiline
+            echo "$AI_TEXT" > /tmp/ai_response.txt
+            echo "ai_success=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post AI comment
+        if: steps.ai.outputs.ai_success == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const aiResponse = fs.readFileSync('/tmp/ai_response.txt', 'utf8');
+
+            const comment = `${aiResponse}
+
+            ---
+            > This is an automated first response by AI. A human will review this issue shortly.
+            > If this response does not address your concern, please add more details and we will investigate further.`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: comment,
+            });
+
+      - name: Add needs-human label if AI failed
+        if: steps.ai.outputs.ai_success != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              labels: ['needs-human'],
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: 'ご報告ありがとうございます。担当者が確認いたしますので、しばらくお待ちください。',
+            });
